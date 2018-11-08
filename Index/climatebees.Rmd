@@ -1,0 +1,435 @@
+---
+title: "Describing Climate"
+date: "2018-10-15"
+author: "Sarah Goslee"
+output: pdf_document
+geometry: margin=1in
+---
+
+# Introduction
+
+This is round three or so of calculating climate indices for species and landscape modeling.
+
+Tasks: 
+
+- weekly and monthly BIOCLIM indices with defined quarters, so current weather can be compared to norms.
+- fifteen-year norms to better capture climate variability.
+- precipitation parameters for APEX/Monte Carlo modeling.
+
+
+Variable definitions:
+
+- https://www.climdex.org/indices.html
+- http://worldclim.org/bioclim
+
+
+Source code to calculate them (have installed both packages):
+
+- https://github.com/pacificclimate/climdex.pcic/blob/master/R/climdex.r
+- https://github.com/jjvanderwal/climates/blob/master/R/bioclim.R
+
+
+Clearly standardizing week numbers (ISO8601 standard) is the right thing to do, but that leads to some years with 52 weeks.
+
+Current approach, subject to change: Use 13-week periods regardless. 
+
+Alternative is McCarthy's approach, which was year-based, and used 53 weeks for all years by adding week 1 of the next year to 52-week years. That's also unsatisfying.
+
+Neither approach means that four quarters add up to a year, so *also* need to calculate annual means/totals. 
+
+Using rolling statistics across year boundaries ensures that winters are characterized properly.
+
+## Data import
+
+The first step is to load useful R packages and import some data to practice with.
+
+Add a date object, and individual columns for week, week-year (not always the same as calendar year), and week-day.
+
+```{r setup, echo=FALSE}
+	# basics
+	source("code/session.rbat")
+
+	# use State College, PA GHCN data as practice
+	# sc <- read.dly("ftp://ftp.ncdc.noaa.gov/pub/data/ghcn/daily/all/USC00368449.dly")
+    # save(sc, file="data/sc.RDA")
+    load("data/sc.RDA")
+
+	sc <- sc[, c(1:4, 8, 12, 16, 20)]
+
+	sc$Date <- as.Date(paste(sc$YEAR, sc$MONTH, sc$DAY, sep="-"))
+
+	## week-related date descriptions
+	# Using K for week to avoid confusion with Winter
+
+	# ISO8601 standard
+	sc$Week <- ISOweek(sc$Date) # %V does not work reliably on Windows apparently
+	sc$KYEAR <- substring(sc$Week, 1, 4)
+	sc$KWEEK <- substring(sc$Week, 7, 8)
+
+	# ‘%u’ Weekday as a decimal number (1-7, Monday is 1).
+	# ISO8601 weeks begin on Monday
+	sc$KDAY <- format(sc$Date, "%u")
+```
+
+For working with winter survival, instead of calendar year, we want continuous winter. The standard approach for BIOCLIM is to use Dec, Jan, Feb for that quarter, but all from the *same year*, which is not useful for us. So instead, we want to develop tools that can be used for arbitrary periods. 
+
+I have two, one to calculate day of year beginning with the first day of an arbitrary month (so equal to Julian day if that month is January), and for week number ditto (so equial to ISO8601 for January). Both of them also provide new year numbers to go with their day or week numbers, so for instance a year starting on July 1, 2015, would completely span the winter of 2015-2016. 
+
+
+```{r winterdates, echo=FALSE}
+
+    # check the numbering and the handling of leap years
+    # For production, will probably reduce the number of columns returned
+
+    test.all <- data.frame(
+     anydoy(sc$Date[sc$YEAR %in% c(2015, 2016)], startmonth=1), 
+     anyweek(sc$Date[sc$YEAR %in% c(2015, 2016)], startmonth=1), 
+     iso=ISOweek(sc$Date[sc$YEAR %in% c(2015, 2016)]), stringsAsFactors=FALSE)
+
+    # for January start, doy and newdoy should match
+    # also ISOweek and anyweek
+    all(test.all$doy == test.all$newdoy)
+    all(test.all$year == test.all$newyear)
+    all(as.numeric(substring(test.all[,9], 1, 4)) == test.all$newyear.1)
+
+
+
+    test.all <- data.frame(
+     anydoy(sc$Date[sc$YEAR %in% c(2015, 2016)], startmonth=7), 
+     anyweek(sc$Date[sc$YEAR %in% c(2015, 2016)], startmonth=7), 
+     iso=ISOweek(sc$Date[sc$YEAR %in% c(2015, 2016)]), stringsAsFactors=FALSE)
+
+
+    test.all[170:190,]
+
+
+
+	## winter-related date descriptions
+	# Using N for winter to avoid confusion with Week
+    # The full-winter year starts on July 1 instead of January 1
+    # so the winter of 2017-2018 is coded 2017
+	sc$DOY <- jdoy(sc$Date) # Julian date
+
+    temp <- anydoy(sc$Date, startmonth=7)
+	sc$NDOY <- temp$newdoy
+	sc$NYEAR <- temp$newyear
+
+    temp <- anyweek(sc$Date, startmonth=7)
+    sc$NKWEEK <- temp$newweek
+    sc$NKYEAR <- temp$newyear
+    rm(temp)
+
+```
+
+
+## Aggregation
+
+Many statistics need to be calculated for each timeperiod. There are several aggregate statistics to calculate:
+
+- Number of days
+- Number of days with minimum temperature data
+- Number of days with maximum temperature data
+- Number of days with precipitation data
+- Extreme minimum temperature
+- Mean minimum temperature
+- Mean temperature
+- Mean maximum temperature
+- Mean daily temperature range
+- Extreme maximum temperature
+- Total precipitation
+- Number of days with precipitation
+- Mean and skewness of precipitation events
+- Probability of a wet day after a dry day or a wet day
+
+And several timeperiods for which to calculate them:
+
+- Year
+- Winter year NYEAR
+- Month
+- Week
+
+### Bioclim
+
+Some bioclim values are calculated for an entire year. Others are calculated based on quarterly summaries.
+
+`climates::bioclim()` calculates values for a single year, rotating start/end months as needed, so Dec, Jan, Feb of the _same_ calendar year are combined. 
+
+For comparison with actual data, I want consecutive periods over more than one year.
+
+I want to add a way to calculate bioclim and climdex for years beginning July 1, or for any arbitrary first day of month. For months, that's easyish; for weeks I need to rewrite ISOweek to take an arbitrary start point.
+
+
+```{r aggregation, echo=FALSE}
+
+    sc.all <- weatheragg(sc)
+    sc.year <- weatheragg(sc, byvar="YEAR")
+    sc.month <- weatheragg(sc, byvar=c("MONTH", "YEAR"))
+    sc.week <- weatheragg(sc, byvar=c("KWEEK", "KYEAR"))
+
+    sc.month.quarter <- quarter(sc.month, period=3)
+    sc.week.quarter <- quarter(sc.week, period=13)
+
+
+```
+
+
+I also want to be able to calculate standard BIOCLIM variables more conveniently. Check to make sure my function gives the same results as `climates::bioclim()`.
+
+```{r bioclim, echo=FALSE}
+
+#### testing new code
+    # test monthly calculations
+
+    myb <- rbind(
+        bioclim.year(subset(sc.month, YEAR==2015)),
+        bioclim.year(subset(sc.month, YEAR==2016)),
+        bioclim.year(subset(sc.month, YEAR==2017)))
+
+    temp <- subset(sc.month, YEAR %in% c(2015, 2016, 2017))
+    climb <- climates::bioclim(
+                      tmin = matrix(temp$tmin, nrow=3, byrow=TRUE),
+                      tmax = matrix(temp$tmax, nrow=3, byrow=TRUE),
+                      prec = matrix(temp$precip, nrow=3, byrow=TRUE),
+                      period="month")
+
+    # Should be TRUE
+    all.equal(matrix(myb), matrix(climb))
+
+    rm(climb, myb, temp)
+
+    # test weekly calculations
+
+    myb <- rbind(
+        bioclim.year(subset(sc.week, KYEAR==2015)),
+        bioclim.year(subset(sc.week, KYEAR==2016)),
+        bioclim.year(subset(sc.week, KYEAR==2017)))
+
+    temp <- subset(sc.week, KYEAR %in% c(2015, 2016, 2017))
+    temp <- subset(temp, KWEEK <= 52)
+    climb <- climates::bioclim(
+                      tmin = matrix(temp$tmin, nrow=3, byrow=TRUE),
+                      tmax = matrix(temp$tmax, nrow=3, byrow=TRUE),
+                      prec = matrix(temp$precip, nrow=3, byrow=TRUE),
+                      period="week")
+
+    # Should be TRUE
+    all.equal(matrix(myb), matrix(climb))
+
+    rm(climb, myb, temp)
+#### end testing new code
+
+    # calculate annual bioclim indices for all years
+    # NOTE this ignores NA values 
+    sc.month.bioclim <- split(sc.month, sc.month$YEAR)
+    sc.month.bioclim <- sc.month.bioclim[sapply(sc.month.bioclim, nrow) == 12]
+    sc.month.bioclim <- data.frame(t(sapply(sc.month.bioclim, bioclim.year)))
+
+    sc.week.bioclim <- split(sc.week, sc.week$KYEAR)
+    sc.week.bioclim <- sc.week.bioclim[!sapply(sc.week.bioclim, nrow) < 52]
+    sc.week.bioclim <- data.frame(t(sapply(sc.week.bioclim, bioclim.year)))
+
+    # can also calculate for continuous winter periods using NYEAR and NKYEAR
+
+```
+
+### CLIMDEX
+
+The next set of indices is CLIMDEX, from the `climdex.pcic` package. The functions involved are clunky, so I wrote a wrapper that makes CLIMDEX calculation work in the same way as BIOCLIM calculation above.
+
+The `climdex` function returns a list with components `year` and `month` for indices calculated on those timeperiods, and can take multiple years.
+
+```{r climdex, echo=FALSE
+
+    # calculates CLIMDEX extremes indices for a daily dataset
+    # default baseline is 1980-2010
+
+    sc.climdex <- climdex(sc)
+
+```
+
+### NRPH
+
+I also use some pasture/range (and more general plant community) specific indices from the USDA-NRCS National Range and Pasture Handbook. The `nrcsnrph` function calculates those indices for a single year. The default column names are for the imported GHCN data. Years with missing data give unreliable results!
+
+Some of these indices duplicate elements of other sets of indices.
+
+*NOTE*: The code has been updated, and values may not quite match results from previous runs. Use the new ones. 
+
+*NOTE*: The `nrcsnrph` function requires temperature in C and rainfall in cm. 
+
+
+
+```{r nrph, echo=FALSE
+
+    # NRPH indices
+
+    sc.nrph <- split(sc, sc$YEAR)
+    sc.nrph <- data.frame(t(sapply(sc.nrph, nrcsnrph)))
+
+```
+
+
+# Bee climate
+
+- currently working on runs.R
+
+*From Christina:*
+
+
+Martina and I looked over the winter management chapter of "The Hive and the Honey Bee"  (the bee biology bible!), and here is what we decided would be good  to use to see if weather correlates with overwintering survival rates.
+ 
+From Nov 15 to Feb 15, the number of days between -5C and +10C. This is the optimal winter temperature for the colony because their metabolism is lowest (so they can conserve their food stores).  This should be positively correlated with survival.
+
+Further comment: Maybe the daily min is -5C or higher and daily max was 10C or lower?  That probably would make the most sense.  
+ 
+From Nov 15 to Feb 15, the number of periods in which there were less than 3 -5.consecutive days of temperature between -5C and +10C.  I am not totally sure this makes sense to calculate like this, but basically this is a question of how much fluctuation there was in the temperature.  This should be negatively correlated with survival. 
+
+Further comment: same as above! 
+ 
+
+From Feb 15 to April 15, the number of days in which the temperature was above 16C and it was not raining.  This should be positively correlated with survival as these are the days in which the bees will forage for food and be able to actively rear brood.
+
+Further comment: I think here the daily max of 16 or higher would make most sense!
+
+
+I tried out a couple of ways to approach this. One is easier if the only variable of interest is whether the day is within the range or outside the range. The second, more complex, approach also provides data on how a day is outside the optimum: high temperature too high, low temperature too low, or both values outside the optimum range.
+
+For the State College example, there are missing data for 1973 and 1974. 
+
+```{r beewinter, echo=FALSE}
+
+
+# days in optimum range with min temp >= -5 and max temp <= +10 during nov 15 - feb 15
+
+    # Option 1: logical - one level
+    Tmin.opt <- sc$TMIN.VALUE >= -5
+    Tmax.opt <- sc$TMAX.VALUE <= 10
+    Topt <- Tmin.opt & Tmax.opt
+
+    # chosen date range: Nov 15 - Feb 15
+	Trange <- rep(FALSE, length(sc$DOY))
+	Trange[sc$NDOY >= 139 & sc$NDOY <= 231] <- TRUE
+
+    # number of days per winter that are within the given range
+    # Note missing data in 1973 and 1974
+	Topt.table <- aggregate(Topt[Trange] ~ factor(sc$NYEAR[Trange], levels=unique(sc$NYEAR)), FUN=sum, na.rm=TRUE, drop=FALSE)
+	Topt.table <- data.frame(as.numeric(as.character(Topt.table[,1])), Topt.table[,2])
+	colnames(Topt.table) <- c("NYEAR", "Optimum")
+
+	Topt.table <- subset(Topt.table, NYEAR > 1892) # drop partial 1892
+	Topt.table <- subset(Topt.table, NYEAR < 2018) # drop partial 2018
+
+
+    with(Topt.table, plot(NYEAR, Optimum, type="l", xlab="Winter year", ylab="Days within optimum range"))
+
+######
+
+    # Option 2: factor-based method, allows for multiple levels
+    Tmin.opt.f <- cut(sc$TMIN.VALUE, c(min(sc$TMIN.VALUE, na.rm=TRUE) - 1, -5, max(sc$TMIN.VALUE, na.rm=TRUE) + 1), right=FALSE)
+    Tmax.opt.f <- cut(sc$TMAX.VALUE, c(min(sc$TMAX.VALUE, na.rm=TRUE) - 1, 10, max(sc$TMAX.VALUE, na.rm=TRUE) + 1), right=TRUE)
+
+    # all the combinations of winter days
+    # not too cold, but too warm; too cold and too warm; too cold and not too warm; just right
+    table(Tmin.opt.f[Trange], Tmax.opt.f[Trange])
+
+    # get totals by year
+
+    Topt.table.f <- t(sapply(seq(min(sc$NYEAR), max(sc$NYEAR)), function(x)c(x, as.vector(table(Tmin.opt.f[Trange & sc$NYEAR == x], Tmax.opt.f[Trange & sc$NYEAR == x])))))
+    Topt.table.f <- data.frame(Topt.table.f[-1, ])
+    colnames(Topt.table.f) <- c("NYEAR", "TooLow", "Optimum", "BothOut", "TooHigh")
+    Topt.table.f <- Topt.table.f[Topt.table.f$NYEAR > 1892, ] # remove partial year
+    Topt.table.f <- Topt.table.f[Topt.table.f$NYEAR < 2018, ] # remove partial year
+
+    # check consistency
+    # but note that missing data is NA in Topt.table, and 0 in Topt.table.f
+    all(Topt.table$Optimum == Topt.table.f$Optimum, na.rm=TRUE)
+```
+
+
+We haven't talked about it in terms of bees, but in general I'm interested in not just number of days but number of consecutive days that something happens. I'm working on improving my tools for investigating those runs, and am using this bee index to refine them.
+
+Things to consider:
+
+- Because we don't know what happens before and after a dataset, the first and last series are not meaningful.
+- What's the best way to return and summarize run results? 
+
+I'm undecided on the best way to summarize runs. 
+
+```{r runs, echo=FALSE}
+
+    # Interested in length of time that optimum is achieved
+
+    # runs of days within the given range
+
+    # take one winter-year to try out
+    # winter of 2015-2016
+
+    # Option 1. Simple logical: this is easy.
+    Topt.runs <- runs(Topt[sc$NYEAR == 2015 & Trange])
+    sapply(Topt.runs, summary)
+
+    # Option 2. Multiple factors.
+    # Need to combine them: runs() looks at joint values
+    Topt.runs.f <- runs(Tmin.opt.f[sc$NYEAR == 2015 & Trange], Tmax.opt.f[sc$NYEAR == 2015 & Trange])
+    sapply(Topt.runs.f, summary)
+
+```
+
+That looks good. The eventual goal is to write a function that takes a list of values and a list of criteria, and does the whole thing. But not today!
+
+
+# Geospatial data
+
+I have a file of coordinates from Martina that need to be matched up with PRISM grid cells, and the climate data extracted.
+
+The point coordinates are in lat-lon WGS84. 
+
+```{r beelocations, echo=FALSE}
+
+    load("data/PRISMgridll.RDA")
+
+    beeloc <- read.table("data/PA_survey_GPS.csv", header=TRUE, sep=";")
+    coordinates(beeloc) <- ~long + lat
+    proj4string(beeloc) <- proj4string(PRISMgridll)
+
+    beeloc.prism <- over(beeloc, PRISMgridll)
+
+    beeloc.prism <- data.frame(id = beeloc[["id"]], PRISMgrid = beeloc.prism$PRISMgrid)
+
+```
+
+# Data files
+
+## Daily weather
+
+The data frame *beeloc.prism* links the bee site id with the PRISM grid cell ID. 
+
+The file *PRISM.pID.RDA* contains a data frame named *PRISM.pID* with:
+
+- date
+- pr: daily precipitation (mm)
+- tmax: daily maximum temperature (C)
+- tmin: daily minimum temperature (C)
+
+Current gridded PRISM data runs from Jan 1981 to Mar 2018.
+
+## Climate indices
+
+The file *PRISM.pNUMBER.clim.RDA* contains a list of data frames named *PRISM.pNUMBER.clim* with:
+
+climdex.year: CLIMDEX indices calculated by year
+climdex.month: CLIMDEX indices calculated by month
+bioclim: BIOCLIM indices calculated by year
+nrph: NRCS pasture-specific variables by year
+mtmax: extreme monthly maximum temperature
+mtmin: extreme monthly minimum temperature
+mtmean: monthly mean temperature
+mpr: monthly precipitation
+tmmin: monthly mean minimum temperature
+tmmax: monthly mean maximum temperature
+tsdmin: standard deviation of monthly minimum temperature
+tsdmax: standard deviation of monthly maximum temperature
+
+The indices are only calculated through 2015, but the above code will calculate the BIOCLIM and CLIMDEX data.
+
+
