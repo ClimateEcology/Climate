@@ -43,7 +43,7 @@ runtrim <- function(dat) {
 
 runs <- function(..., trim=TRUE) {
 
-    if(...length() == 1) {
+    if(length(list(...)) == 1) {
         dat <- ..1
         all.levels <- unique(dat)
     } else {
