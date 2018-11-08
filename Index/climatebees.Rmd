@@ -50,9 +50,9 @@ Add a date object, and individual columns for week, week-year (not always the sa
 	source("code/session.rbat")
 
 	# use State College, PA GHCN data as practice
-	# sc <- read.dly("ftp://ftp.ncdc.noaa.gov/pub/data/ghcn/daily/all/USC00368449.dly")
+	sc <- read.dly("ftp://ftp.ncdc.noaa.gov/pub/data/ghcn/daily/all/USC00368449.dly")
     # save(sc, file="data/sc.RDA")
-    load("data/sc.RDA")
+    # load("data/sc.RDA")
 
 	sc <- sc[, c(1:4, 8, 12, 16, 20)]
 
