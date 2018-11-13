@@ -1,0 +1,17 @@
+library(ecodist)
+library(RColorBrewer)
+library(sp)
+library(rgdal)
+
+library(VFS)
+library(ISOweek)
+library(climates)
+library(climdex.pcic)
+
+# source functions
+for(i in list.files("R$", path="func", full.names=TRUE)) {
+    source(i)
+}
+rm(i)
+
+

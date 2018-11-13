@@ -1,0 +1,70 @@
+
+for(infilename in ls(pattern="^wx")) {
+        infile <- get(infilename)
+        inindex <- strsplit(infilename, "\\.")[[1]][2]
+        thislat <- coordinates(stationlist)[rownames(stationlist@data) == inindex, "Station_Lat"]
+
+        # aggregate based on weeks and months
+        infile$week <- ISOweek(infile$date) # %V does not work reliably on Windows apparently
+        infile$weekyear <- substring(infile$week, 1, 4)
+        infile$week <- substring(infile$week, 7, 8)
+
+        infile$month <- format(infile$date, "%m")
+        infile$year <- format(infile$date, "%Y")
+
+        infile.month <- weatheragg(infile, byvar=c("month", "year"), tmaxcol="tmax", tmincol="tmin", precipcol="pr", preciplim=0)
+        infile.week <- weatheragg(infile, byvar=c("week", "weekyear"), tmaxcol="tmax", tmincol="tmin", precipcol="pr", preciplim=0)
+
+        infile.month.quarter <- quarter(infile.month, period=3, tmaxcol="tmax", tmincol="tmin", precipcol="pr", rotate=FALSE)
+        infile.week.quarter <- quarter(infile.week, period=13, tmaxcol="tmax", tmincol="tmin", precipcol="pr", rotate=FALSE)
+
+        # Standard BIOCLIM indices
+
+        # calculate annual bioclim indices for all years
+        # NOTE this ignores NA values
+        # this rotates the month values to get annual max
+        infile.bioclim.month <- split(infile.month, infile.month$year)
+        infile.bioclim.month <- infile.bioclim.month[sapply(infile.bioclim.month, nrow) == 12]
+        infile.bioclim.month <- data.frame(t(sapply(infile.bioclim.month, bioclim.year)))
+
+        infile.bioclim.week <- split(infile.week, infile.week$weekyear)
+        infile.bioclim.week <- infile.bioclim.week[!sapply(infile.bioclim.week, nrow) < 52]
+        infile.bioclim.week <- data.frame(t(sapply(infile.bioclim.week, bioclim.year)))
+
+        # Standard CLIMDEX indices
+
+        infile.climdex <- climdex(infile, tmaxcol="tmax", tmincol="tmin", precipcol="pr", datecol="date", base.range=c(1981, 2010))
+        infile.climdex.year <- infile.climdex$year
+        infile.climdex.month <- infile.climdex$month
+        rm(infile.climdex)
+
+        # NRPH indices
+
+        infile.nrph <- split(infile, infile$year)
+        infile.nrph <- data.frame(t(sapply(infile.nrph, nrcsnrph, tmaxcol="tmax", tmincol="tmin", precipcol="pr", datecol="date")))
+
+        # SPEI
+
+        infile.spei <- speiall(infile.month, thislat)
+
+    #### summary statistics: quantile and trend for all data and for specified span of years
+
+        # start with specified year (usually ending in 1 or 6)
+
+        # indices
+        infile.bioclim.month.q <- climchunk(infile.bioclim.month[rownames(infile.bioclim.month) >= qstart, ], inc=5, span=15)
+        infile.bioclim.week.q <- climchunk(infile.bioclim.week[rownames(infile.bioclim.week) >= qstart, ], inc=5, span=15)
+        infile.nrph.q <- climchunk(infile.nrph[rownames(infile.nrph) >= qstart, ], inc=5, span=15)
+        infile.climdex.year.q <- climchunk(infile.climdex.year[rownames(infile.climdex.year) >= qstart, ], inc=5, span=15)
+
+        # month must be split
+        qstart.id <- substring(rownames(infile.climdex.month), 1, 4) >= qstart
+        infile.climdex.month.q <- split(infile.climdex.month[qstart.id, ], rep(1:12, length.out=nrow(infile.climdex.month[qstart.id, ])))
+        infile.climdex.month.q <- lapply(infile.climdex.month.q, climchunk, inc=5, span=15)
+
+        infile.month.q <- split(infile.month[qstart.id, 7:ncol(infile.month)], infile.month$month[qstart.id])
+        infile.month.q <- lapply(infile.month.q, climchunk, inc=5, span=15)
+
+        # week is too short a timespan to be worth calculating quantiles
+}
+

@@ -1,0 +1,92 @@
+# Import current GHCN data
+
+
+# import and clean up the ghcn data
+
+tclean <- function(x) {
+    x <- read.dly(x)
+    x <- x[, c(1:4, 8, 12, 16, 20)]
+	x$date <- as.Date(paste(x$YEAR, x$MONTH, x$DAY, sep="-"))
+    x <- x[, !(colnames(x) %in% c("YEAR", "MONTH", "DAY"))]
+    colnames(x) <- c("pr", "snow", "snowd", "tmax", "tmin", "date")
+    x
+}
+
+wx.FL1.ghcn <- tclean("ftp://ftp.ncdc.noaa.gov/pub/data/ghcn/daily/all/USC00085895.dly")
+wx.MO1.ghcn <- tclean("ftp://ftp.ncdc.noaa.gov/pub/data/ghcn/daily/all/USC00236012.dly")
+wx.WY1.ghcn <- tclean("ftp://ftp.ncdc.noaa.gov/pub/data/ghcn/daily/all/USW00024018.dly")
+wx.OH1.ghcn <- tclean("ftp://ftp.ncdc.noaa.gov/pub/data/ghcn/daily/all/USW00014821.dly")
+wx.ID1.ghcn <- tclean("ftp://ftp.ncdc.noaa.gov/pub/data/ghcn/daily/all/USW00024131.dly")
+wx.GA1.ghcn <- tclean("ftp://ftp.ncdc.noaa.gov/pub/data/ghcn/daily/all/USC00096087.dly")
+wx.NM1.ghcn <- tclean("ftp://ftp.ncdc.noaa.gov/pub/data/ghcn/daily/all/USC00298535.dly")
+wx.MI1.ghcn <- tclean("ftp://ftp.ncdc.noaa.gov/pub/data/ghcn/daily/all/USW00014836.dly")
+wx.MD1.ghcn <- tclean("ftp://ftp.ncdc.noaa.gov/pub/data/ghcn/daily/all/USC00180700.dly")
+wx.MS1.ghcn <- tclean("ftp://ftp.ncdc.noaa.gov/pub/data/ghcn/daily/all/USC00224869.dly")
+wx.ND1.ghcn <- tclean("ftp://ftp.ncdc.noaa.gov/pub/data/ghcn/daily/all/USC00325479.dly")
+wx.NE1.ghcn <- tclean("ftp://ftp.ncdc.noaa.gov/pub/data/ghcn/daily/all/USW00014939.dly")
+wx.WA1.ghcn <- tclean("ftp://ftp.ncdc.noaa.gov/pub/data/ghcn/daily/all/USC00456789.dly")
+wx.OK1.ghcn <- tclean("ftp://ftp.ncdc.noaa.gov/pub/data/ghcn/daily/all/USW00003932.dly")
+wx.TX1.ghcn <- tclean("ftp://ftp.ncdc.noaa.gov/pub/data/ghcn/daily/all/USC00413485.dly")
+wx.PA1.ghcn <- tclean("ftp://ftp.ncdc.noaa.gov/pub/data/ghcn/daily/all/USC00364778.dly")
+wx.IA1.ghcn <- tclean("ftp://ftp.ncdc.noaa.gov/pub/data/ghcn/daily/all/USC00130200.dly")
+wx.AZ1.ghcn <- tclean("ftp://ftp.ncdc.noaa.gov/pub/data/ghcn/daily/all/USC00022140.dly")
+wx.NE2.ghcn <- tclean("ftp://ftp.ncdc.noaa.gov/pub/data/ghcn/daily/all/USC00250375.dly")
+wx.OK2.ghcn <- tclean("ftp://ftp.ncdc.noaa.gov/pub/data/ghcn/daily/all/USC00348042.dly")
+wx.TX2.ghcn <- tclean("ftp://ftp.ncdc.noaa.gov/pub/data/ghcn/daily/all/USC00419001.dly")
+wx.MN2.ghcn <- tclean("ftp://ftp.ncdc.noaa.gov/pub/data/ghcn/daily/all/USC00218450.dly")
+rm(tclean)
+
+
+
+# Identify the gridded data cells
+
+# load("data/LIVNEHgrid-ll.RDA")
+load("data/LOCAgrid-ll.RDA")
+load("data/MAURgridll.RDA")
+load("data/PRISMgridll.RDA")
+
+
+
+
+# get the site information
+
+stationlist.dat <- read.table("data/stationlist.csv", header=TRUE, sep=",", stringsAsFactors=FALSE)
+stationlist <- stationlist.dat
+coordinates(stationlist) <- ~ Station_Long + Station_Lat
+proj4string(stationlist) <- proj4string(PRISMgridll)
+
+# Livneh and LOCA grids are identical over CONUS; differ only
+# in extent, but have matching ID numbers
+stationlist[["PRISM"]] <- over(stationlist, PRISMgridll)[,1]
+stationlist[["Maurer"]] <- over(stationlist, MAURgridll)[,1]
+# stationlist[["Livneh"]] <- over(stationlist, LIVNEHgridll)[,1]
+stationlist[["LOCA"]] <- over(stationlist, LOCAgridll)[,1]
+
+# source("code/download.sh") 
+
+
+
+# Import and rename the gridded data cells
+
+write.table(stationlist@data[, c("PRISM", "Maurer", "LOCA")], "templist.csv")
+
+for(i in seq_len(nrow(stationlist@data))) {
+    thisid <- stationlist$PRISM[i]
+    infile <- load(file.path("data", "point", paste0("PRISM.p", sprintf("%06d", thisid), ".RDA")))
+    assign(paste("wx". rownames(stationlist@data)[i], "prism", sep="."), get(infile))
+    rm(list=c(infile))
+
+    thisid <- stationlist$Maurer[i]
+    infile <- load(file.path("data", "point", paste0("maurer.p", sprintf("%06d", thisid), ".RDA")))
+    assign(paste("wx". rownames(stationlist@data)[i], "maurer", sep="."), get(infile))
+    rm(list=c(infile))
+
+    thisid <- stationlist$LOCA[i]
+    infile <- load(file.path("data", "point", paste0("livneh.p", sprintf("%06d", thisid), ".RDA")))
+    assign(paste("wx". rownames(stationlist@data)[i], "livneh", sep="."), get(infile))
+    rm(list=c(infile))
+}
+
+rm(i)
+
+

@@ -1,0 +1,43 @@
+---
+title: "Climate Indices"
+date: "`r Sys.Date()`"
+author: "Sarah Goslee"
+output: pdf_document
+geometry: margin=1in
+---
+
+# Introduction
+
+I have a series of questions about climate data, and I'm making a first pass at answering them using the LTAR sites as a representative sample.
+
+- How long a time period should be used to parameterize rainfall models / what are the effects on variability for different times?
+- How much variability is lost by using PRISM/LOCA/Maurer gridded data instead of point data?
+- How do we relate current conditions to long-term normals for the more complex indices, such as BIOCLIM?
+- What other indices should we be considering? There are other agroclimatic indices in the literature.
+
+
+```{r setup, echo=FALSE}
+	# basics
+	source("code/session.rbat")
+
+    # all the weather data files are named: wx.LOC.source
+    # the wx aids in automation
+	source("code/dataimport.rbat")
+
+    save.image("working.RData")
+
+```
+
+
+# Tasks
+
+- X Identify weather stations near the LTAR met sites.
+- X Import GHCN data for the points.
+- [Get the LTAR met data for those points? Or just use GHCN?] For now, use GHCN.
+- X Identify the PRISM, Maurer, Livneh grid cells and get the data.
+
+# Indices and quantiles
+
+First, I need to figure out how to handle missing data in the GHCN data. The gridded datasets are complete, but the point data are messy.
+
+
