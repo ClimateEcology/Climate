@@ -1,4 +1,5 @@
 
+
 # Calculate NRCS climate indices from
 # National Range and Pasture Handbook
 # for one year of data
@@ -32,27 +33,10 @@ nrcsnrph <- function(x, tmaxcol="TMAX.VALUE", tmincol="TMIN.VALUE", precipcol="P
     # returns 0, NA, NA if full year is below 28F
     # if there are multiple freeze-free periods of identical length, takes the first
 
-    dayT.28 <- tmin < FtoC(28)
-    if(all(dayT.28)) {
-        # Never freezes
-        dayT.28 <- length(dayT.28)
-        dayT.28.last <- NA
-        dayT.28.first <- NA
-    } else {
-        # No growing season
-        if(all(!dayT.28)) {
-            dayT.28 <- 0
-            dayT.28.last <- NA
-            dayT.28.first <- NA
-        } else {
-            dayT.28.rle <- rle(dayT.28)
-            dayT.28 <- max(dayT.28.rle$length[dayT.28.rle$values == FALSE], na.rm=TRUE)
-            tempid <- min(which(dayT.28.rle$length == dayT.28 & dayT.28.rle$values == FALSE), na.rm=TRUE)
-            dayT.28.last <- sum(dayT.28.rle$lengths[seq(1, tempid - 1)], na.rm=TRUE)
-            dayT.28.first <- dayT.28.last + dayT.28 + 1
-        }
-    }
-
+    dayT.28 <- gslength(tmin, FtoC(28))
+    dayT.28.last <- dayT.28$lastinspring
+    dayT.28.first <- dayT.28$firstinautumn
+    dayT.28 <- dayT.28$gslength
 
     
     # 4. length of growing season (32 °F) in days
@@ -62,26 +46,10 @@ nrcsnrph <- function(x, tmaxcol="TMAX.VALUE", tmincol="TMIN.VALUE", precipcol="P
     # returns 0, NA, NA if full year is below 32F
     # if there are multiple frost-free periods of identical length, takes the first
 
-    dayT.32 <- tmin < FtoC(32)
-    if(all(dayT.32)) {
-        # Never frosts
-        dayT.32 <- length(dayT.32)
-        dayT.32.last <- NA
-        dayT.32.first <- NA
-    } else {
-        # All frost
-        if(all(!dayT.32)) {
-            dayT.32 <- 0
-            dayT.32.last <- NA
-            dayT.32.first <- NA
-        } else {
-            dayT.32.rle <- rle(dayT.32)
-            dayT.32 <- max(dayT.32.rle$length[dayT.32.rle$values == FALSE], na.rm=TRUE)
-            tempid <- min(which(dayT.32.rle$length == dayT.32 & dayT.32.rle$values == FALSE), na.rm=TRUE)
-            dayT.32.last <- sum(dayT.32.rle$lengths[seq(1, tempid - 1)], na.rm=TRUE)
-            dayT.32.first <- dayT.32.last + dayT.32 + 1
-        }
-    }
+    dayT.32 <- gslength(tmin, FtoC(32))
+    dayT.32.last <- dayT.32$lastinspring
+    dayT.32.first <- dayT.32$firstinautumn
+    dayT.32 <- dayT.32$gslength
 
     # 7. growing degree-days (base 40F) in C
     gdd40C <- sum(ifelse(tmean < FtoC(40), 0, tmean - FtoC(40)), na.rm=TRUE)
@@ -109,10 +77,10 @@ nrcsnrph <- function(x, tmaxcol="TMAX.VALUE", tmincol="TMIN.VALUE", precipcol="P
     if(dayT.32 >= 365) {
         gsP <- yearP
     } else { 
-        if(is.na(dayT.32)) {
+        if(is.na(dayT.32) | dayT.32 == 0) {
             gsP <- NA
         } else {
-            gsP <- sum(precip[seq(dayT.32.last, dayT.32.first)], na.rm=TRUE)
+            gsP <- sum(precip[seq(dayT.32.last+1, dayT.32.first-1)], na.rm=TRUE)
         }
     }
 
@@ -136,3 +104,4 @@ nrcsnrph <- function(x, tmaxcol="TMAX.VALUE", tmincol="TMIN.VALUE", precipcol="P
 
     results
 }
+
